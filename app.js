@@ -43,7 +43,7 @@ app.use(require("./middleware/errorHandler"));
 // 错误处理中间件
 app.use(router.routes())
 // 启动服务器
-
+router.use(require("./routes/public/index"));
 router.use(require("./routes/index.js"));
 
 app.listen(PORT, () => {

@@ -26,5 +26,5 @@ routes.forEach(el => {
   router.use(`/${el}`, require(`./${el}/index.js`));
 });
 
-
 module.exports = router.routes();
+
