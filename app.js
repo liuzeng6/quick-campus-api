@@ -11,7 +11,7 @@ const routerResponse = require("./middleware/routerResponse.js");
 
 
 // 引入服务器相关配置
-const { koaBodyConfig, port: PORT } = require("./config/server.config.js");
+const { koaBodyConfig, port } = require("./config/server.config.js");
 const databaseConfig = require("./config/database.config.js");
 
 // 数据库中转模块
@@ -46,6 +46,7 @@ app.use(router.routes())
 router.use(require("./routes/public/index"));
 router.use(require("./routes/index.js"));
 
+const PORT = process.argv[2] || port;
 app.listen(PORT, () => {
     console.log(`服务器正在运行在 http://localhost:${PORT}`);
 });
