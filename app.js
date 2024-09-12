@@ -33,7 +33,7 @@ const router = new Router();
 // 配置统一响应
 app.use(routerResponse());
 // 配置跨域
-app.use(cors());
+app.use(cors("*"));
 // 配置静态文件路由
 app.use(static(path.join(__dirname, "public")));
 // 解析 POST 请求的数据

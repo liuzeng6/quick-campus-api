@@ -3,7 +3,7 @@ const create = require('../utils/create');
 const { getTime } = require("../utils/time");
 module.exports = async (ctx, next) => {
     let token = ctx.headers.authorization;
-    console.log(token, ctx.path);
+    // console.log(token, ctx.path);
     if (token) {
         let sql = `select * from user where token = ?`;
         let [[res]] = await ctx.db.query(sql, [token]);

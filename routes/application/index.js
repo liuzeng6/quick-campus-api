@@ -15,7 +15,17 @@ router.get("/college", async (ctx) => {
     let sql = `select * from edu`;
     let [res] = await mysql.db.query(sql);
     ctx.success(res);
-})
+});
 
+// 获取初始化信息
+router.get("/configs", async (ctx) => {
+    ctx.success({
+        spread: [{
+            image: "/static/images/banner.png",
+            url: "https://www.baidu.com"
+        }],
+        qc_code: "../../static/images/qc_code.jpg"
+    });
+})
 
 module.exports = router.routes();

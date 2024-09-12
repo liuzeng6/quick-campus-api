@@ -2,6 +2,7 @@ const router = require('koa-router')();
 const mysql = require("../../service/database_module");
 let { PAGESIZE, baseURL } = require("../../config/server.config");
 let { getTime } = require("../../utils/time");
+const e = require('express');
 
 // GET
 
@@ -70,13 +71,19 @@ router.get("/topics/:id", async (ctx) => {
 
     let sql = `
         SELECT
-                T.*,
-                JSON_OBJECT( 'avatar', U.avatar, 'id', U.id, 'nickname', U.nickname) AS user 
+            T.*,
+            ! ISNULL( P.id ) AS is_like,
+            ! ISNULL( C.id ) AS is_collect,
+            JSON_OBJECT( 'avatar', U.avatar, 'id', U.id, 'nickname', U.nickname ) AS user 
         FROM
-                topic AS T
-                LEFT JOIN USER AS U ON U.id = T.uid 
+            topic AS T
+            LEFT JOIN USER AS U ON U.id = T.uid
+            LEFT JOIN collect AS C ON T.id = C.tid AND C.uid = T.uid AND C.createtime != 0
+            LEFT JOIN praise AS P ON T.id = P.tid AND P.uid = T.uid 
         WHERE
-                T.is_block = 0 and T.id = ? and U.is_black = 0
+            T.is_block = 0 
+            AND T.id = ? 
+            AND U.is_black = 0
     `;
 
     let [res] = await mysql.db.query(sql, [id]);
@@ -106,57 +113,103 @@ router.get('/topics/comments/:id', async (ctx) => {
         ctx.fail("ID必须是数字");
         return false;
     }
-    let sql = `
+    await mysql.db.query(`SET GLOBAL group_concat_max_len = 102400;`);
+    // let sql = `
+    //     SELECT
+    //         C.*,
+    //         JSON_OBJECT( 'avatar', U.avatar, 'id', U.id, 'nickname', U.nickname ) AS 'user',
+    //         if(ISNULL(RC.id),"[]",CONCAT(
+    //             '[',
+    //             GROUP_CONCAT(
+    //                 JSON_OBJECT(
+    //                     'content',
+    //                     RC.content,
+    //                     "createtime",
+    //                     RC.createtime,
+    //                     "id",
+    //                     RC.id,
+    //                     "like_number",
+    //                     RC.like_number,
+    //                     'user',
+    //                     JSON_OBJECT( 'avatar', RU.avatar, 'id', RU.id, 'nickname', RU.nickname ),
+    //                     'ruser',RUSER.nickname
+    //                 )),
+    //             ']' 
+    //         )) as replies
+    //     FROM
+    //         COMMENT AS C
+    //         LEFT JOIN COMMENT AS RC ON C.id = RC.rid and RC.is_block = 0
+    //         LEFT JOIN USER as RU ON RC.uid = RU.id
+    //         LEFT JOIN USER AS U ON C.uid = U.id 
+    //         LEFT JOIN USER as RUSER on RC.ruid = RUSER.id
+    //     WHERE
+    //         C.tid = ?
+    //         AND C.is_block = 0 
+    //         AND C.rid = 0 
+    //     ORDER BY
+    //         ${sort == 2 ? `C.like_number,C.createtime` : `C.createtime,C.like_number`}  
+    //     `;
+
+
+    try {
+        let sql = `
         SELECT
             C.*,
-            JSON_OBJECT( 'avatar', U.avatar, 'id', U.id, 'nickname', U.nickname ) AS 'user',
-            if(ISNULL(RC.id),"[]",CONCAT(
-                '[',
-                GROUP_CONCAT(
-                    JSON_OBJECT(
-                        'content',
-                        RC.content,
-                        "createtime",
-                        RC.createtime,
-                        "id",
-                        RC.id,
-                        "like_number",
-                        RC.like_number,
-                        'user',
-                        JSON_OBJECT( 'avatar', RU.avatar, 'id', RU.id, 'nickname', RU.nickname ) 
-                    )),
-                ']' 
-            )) as replies
+            JSON_OBJECT( 'avatar', U.avatar, 'id', U.id, 'nickname', U.nickname ) AS 'user'
         FROM
             COMMENT AS C
-            LEFT JOIN COMMENT AS RC ON C.id = RC.rid and RC.is_block = 0
-            LEFT JOIN USER as RU ON RC.uid = RU.id
             LEFT JOIN USER AS U ON C.uid = U.id 
         WHERE
             C.tid = ?
             AND C.is_block = 0 
             AND C.rid = 0 
-        ORDER BY
+            ORDER BY
             ${sort == 2 ? `C.like_number,C.createtime` : `C.createtime,C.like_number`}  
-        `;
-    let [res] = await mysql.db.query(sql, [id]);
-    if (res.length) {
-        res = res.map(el => {
-            el.replies = JSON.parse(el.replies);
-            el.reply_number = el.replies.length;
-            el.is_block = false;
-            el.user.is_block = false;
-            return el;
+        `
+        let [res] = await mysql.db.query(sql, [id]);
+        let [data] = await mysql.db.query(`
+        SELECT
+            C.*,
+            JSON_OBJECT( 'avatar', U.avatar, 'id', U.id, 'nickname', U.nickname ) AS 'user',
+						RC.nickname as ruser
+
+        FROM
+            COMMENT AS C
+            LEFT JOIN USER AS U ON C.uid = U.id 
+						LEFT JOIN USER AS RC ON C.ruid = RC.id
+        WHERE
+            C.tid = ?
+            AND C.is_block = 0 
+            AND C.rid !=0
+        `, [id]);
+        data.map((el, index) => {
+            let item = res.find(elment => elment.id == el.rid);
+            if (!item.replies) {
+                item.replies = [];
+            }
+            item.replies.push(el);
         })
+        if (res.length) {
+            res = res.map(el => {
+                el.reply_number = el?.replies?.length;
+                el.is_block = false;
+                el.user.is_block = false;
+                return el;
+            })
+        }
         ctx.success(res);
-    } else {
-        ctx.fail("帖子不存在获取已经被删除！");
+
+    } catch (e) {
+        console.log(e);
+
+        ctx.fail("获取评论失败");
     }
+
 })
 
 // 获取帖子标签
 router.get("/tags", async (ctx) => {
-    let sql = `select id,tag from classify where open='1'`;
+    let sql = `select *,open=1 as enable from classify`;
     let [res] = await mysql.db.query(sql);
     ctx.success(res);
 });
@@ -179,7 +232,7 @@ router.get('/my/topics', async (ctx) => {
                 topic AS T
                 LEFT JOIN USER AS U ON U.id = T.uid 
         WHERE
-                T.is_block = 0 and T.uid = ? and U.is_black = 0
+                T.is_block = 0 and T.uid = ? and U.is_black = 0 and T.createtime != 0
     `;
     let [res] = await mysql.db.query(sql, [uid]);
     res = res.map(el => {
@@ -199,7 +252,7 @@ router.get('/my/collect/topics', async (ctx) => {
         FROM
             collect AS C
             LEFT JOIN user AS U ON u.id = C.uid
-            LEFT JOIN topic AS T ON C.uid = T.id
+            LEFT JOIN topic AS T ON C.tid = T.id
         where C.uid = ? and C.createtime != 0
     `;
     let [res] = await mysql.db.query(sql, [uid]);
@@ -237,13 +290,13 @@ router.get('/my/likeds', async (ctx) => {
 router.get("/my/statistic", async (ctx) => {
     let uid = ctx.id;
     let collection_count, commented_count, liked_count, topic_count;
-    [[{ collection_count }]] = await mysql.db.query(`select count(*) as collection_count from collect where uid = ?`, [uid]);
+    [[{ collection_count }]] = await mysql.db.query(`select count(*) as collection_count from collect where uid = ? and createtime !=0`, [uid]);
     // 收藏数量
     [[{ commented_count }]] = await mysql.db.query(`select count(*) as commented_count from comment where uid = ?`, [uid]);
     // 评论数量
     [[{ liked_count }]] = await mysql.db.query(`select count(*) as liked_count from praise where uid = ?`, [uid]);
     // 收到的点赞数量
-    [[{ topic_count }]] = await mysql.db.query(`select count(*) as topic_count from topic where uid = ?`, [uid]);
+    [[{ topic_count }]] = await mysql.db.query(`select count(*) as topic_count from topic where uid = ? and createtime !=0`, [uid]);
     // 帖子数量
     ctx.success({
         collection_count, commented_count, liked_count, topic_count
@@ -258,12 +311,12 @@ router.get("/my/replieds", async (ctx) => {
     let sql = `
         SELECT
             C.*,
-            RC.content AS source_review,
+            T.title AS source_review,
             JSON_OBJECT( 'avatar', U.avatar, 'id', U.id, 'nickname', U.nickname ) AS 'user' 
         FROM
             COMMENT AS C
             LEFT JOIN USER AS U ON U.id = C.uid
-            LEFT JOIN COMMENT AS RC ON RC.rid = C.id 
+            LEFT JOIN topic AS T ON T.id = C.tid
         WHERE
             C.tid IN ( SELECT id FROM topic WHERE uid = ? ) 
             AND C.uid != ? 
@@ -278,13 +331,14 @@ router.get("/my/replieds", async (ctx) => {
 //POST 
 
 // 快捷举报
-router.post("/report/:id", async (ctx) => {
+router.post("/report/:tid", async (ctx) => {
     let stamp = getTime();
     let uid = ctx.id;
-    let { remark = "快捷举报", reported_id, reported_type } = ctx.request.body;
-    if (remark && reported_id && reported_type) {
+    let { tid } = ctx.params;
+    let { remark = "快捷举报", reported_type } = ctx.request.body;
+    if (remark && tid && reported_type) {
         let sql = `insert into reports value(0,?,?,?,?,?)`;
-        let [res] = await mysql.db.query(sql, [remark, reported_id, reported_type, stamp, uid])
+        let [res] = await mysql.db.query(sql, [remark, tid, reported_type, stamp, uid])
         if (res.affectedRows) {
             ctx.success("操作成功")
         } else {
@@ -300,12 +354,13 @@ router.post("/report/:id", async (ctx) => {
 router.post("/replies", async (ctx) => {
     let stamp = getTime();
     let uid = ctx.id;
-    let { content, comment_id, topic_id } = ctx.request.body;
+    let { content, comment_id, topic_id, type = 1, ruid = 0 } = ctx.request.body;
     if (comment_id != undefined && topic_id && content) {
-        let sql = `insert into comment value(0,?,?,0,?,?,0,0,?)`;
-        let [res] = await mysql.db.query(sql, [topic_id, uid, content, stamp, comment_id])
+        let sql = `insert into comment value(0,?,?,0,?,?,0,0,?,?,?)`;
+        let [res] = await mysql.db.query(sql, [topic_id, uid, content, stamp, comment_id, ruid, type]);
+        await mysql.db.query(`update topic set comment_number = comment_number+1 where id = ?`, [topic_id]);
         if (res.affectedRows) {
-            ctx.success("操作成功")
+            ctx.success("操作成功");
         } else {
             ctx.fail("操作失败");
         }
@@ -367,6 +422,8 @@ router.post('/like/comments/:cid', async (ctx) => {
 
 // 发布帖子
 router.post("/topics/publish", async (ctx) => {
+    console.log('出错了');
+
     let stamp = getTime();
     let uid = ctx.id;
     let { content, resources, tag_id, title, eid = 0 } = ctx.request.body;
